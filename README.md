@@ -16,10 +16,47 @@ SenAI CRM Intelligence is a real-time AI-powered CRM designed to ingest emails, 
 - **Sentence-transformers vs. OpenAI embeddings**: `all-MiniLM-L6-v2` runs locally and is free. 768-dimensional vectors fit neatly in pgvector and offer excellent retrieval quality for our specific corpus size without network overhead.
 - **Conflicting Signal Resolution**: When an email contains mixed signals (e.g., positive sentiment but a refund request), the system categorizes based on the **primary business intent** (Billing/Complaint) rather than emotional valence. The confidence score is capped at 0.80 to ensure a human reviews these edge cases.
 
-## Environment Setup
-1. Clone the repository.
-2. Create a `.env` file with `GEMINI_API_KEY` and other secrets.
-3. Run `docker-compose up -d` to start the PostgreSQL (pgvector) database.
-4. Set up a Python virtual environment and install backend dependencies.
-5. Seed the knowledge base: `python backend/seed_knowledge_base.py`
-6. Run the application!
+## How to Run the System
+
+The system is composed of three interconnected parts: the Database, the Backend API, and the Frontend Dashboard. You must run them in this exact order.
+
+### 1. Start the Database
+Open a terminal in the root directory and start the PostgreSQL container (with `pgvector`):
+```bash
+docker-compose up -d
+```
+*(Wait a few seconds for the database to fully initialize).*
+
+### 2. Configure Environment Variables
+Create a `.env` file in the root directory. Add your Gemini API key and the database URL:
+```env
+GEMINI_API_KEY=your_google_gemini_api_key
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/senaicrm
+```
+
+### 3. Start the Backend API & Seed Data
+Open a **new** terminal in the root directory:
+```bash
+# Create and activate virtual environment (Windows)
+python -m venv .venv
+.\.venv\Scripts\activate
+
+# Install requirements
+pip install -r requirements.txt
+
+# Seed the knowledge base (Run this exactly ONCE)
+python backend/rag/seed_knowledge_base.py
+
+# Start the API server
+uvicorn backend.main:app --reload --port 8000
+```
+*The backend API documentation is now available at http://localhost:8000/docs*
+
+### 4. Start the Frontend Dashboard
+Open a **new** terminal (leave the backend running) and navigate to the frontend folder:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+*The React dashboard is now available at http://localhost:3000*
