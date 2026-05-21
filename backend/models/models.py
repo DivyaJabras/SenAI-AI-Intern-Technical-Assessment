@@ -83,7 +83,7 @@ class KnowledgeChunk(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     source_doc = Column(String, index=True)
     chunk_text = Column(Text)
-    embedding = Column(Vector(768)) # 768 dimensions for all-MiniLM-L6-v2
+    embedding = Column(Vector(384)) # 384 dimensions for all-MiniLM-L6-v2
     
 class WebIntelligenceCache(Base):
     __tablename__ = "web_intelligence_cache"

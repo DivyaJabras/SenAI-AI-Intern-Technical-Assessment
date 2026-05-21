@@ -1,9 +1,10 @@
 import os
 import asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from models.database import DATABASE_URL
-from models.models import KnowledgeChunk
+from models.models import Base, KnowledgeChunk
 from rag.chunker import chunk_document
 from rag.embedder import get_embedding
 
@@ -12,6 +13,12 @@ KNOWLEDGE_DIR = os.path.join(os.path.dirname(__file__), "knowledge")
 async def seed_db():
     print("Connecting to database...")
     engine = create_async_engine(DATABASE_URL, echo=False)
+    
+    print("Creating tables (if they do not exist)...")
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.run_sync(Base.metadata.create_all)
+        
     AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     
     async with AsyncSessionLocal() as session:

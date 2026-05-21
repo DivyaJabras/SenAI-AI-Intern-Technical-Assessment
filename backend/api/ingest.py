@@ -57,9 +57,162 @@ def run_heuristic_prefilter(email: EmailIngestRequest) -> Dict[str, Any]:
         
     return flags
 
+def run_mock_classification(subject: str, body: str, is_security_threat: bool, is_urgent: bool, is_gdpr_request: bool, rag_context: list) -> dict:
+    subject_body = f"{subject} {body}".lower()
+    
+    # 1. Category Heuristics
+    category = "General Inquiry"
+    if any(k in subject_body for k in ["refund", "charge", "billing", "invoice", "payment", "price", "pricing", "discount"]):
+        category = "Billing/Refund"
+    elif any(k in subject_body for k in ["down", "outage", "broken", "bug", "crash", "error", "403", "404", "500", "fail", "not working"]):
+        category = "Technical Support"
+    elif any(k in subject_body for k in ["sales", "buy", "demo", "trial", "enterprise plan"]):
+        category = "Sales"
+    elif any(k in subject_body for k in ["gdpr", "privacy", "agreement", "legal", "lawsuit", "terms"]):
+        category = "Compliance/Legal"
+        
+    # 2. Sentiment Heuristics
+    sentiment = "Neutral"
+    sentiment_score = 0.0
+    negatives = ["unhappy", "frustrated", "awful", "bad", "slow", "down", "loss", "losing", "worst", "fail", "error", "hate", "issue", "problem"]
+    positives = ["great", "good", "happy", "love", "awesome", "perfect", "thanks", "thank you", "excel", "helpful"]
+    
+    neg_count = sum(1 for k in negatives if k in subject_body)
+    pos_count = sum(1 for k in positives if k in subject_body)
+    
+    if neg_count > pos_count:
+        sentiment = "Negative"
+        sentiment_score = -0.5 - min(0.4, neg_count * 0.1)
+    elif pos_count > neg_count:
+        sentiment = "Positive"
+        sentiment_score = 0.4 + min(0.5, pos_count * 0.1)
+    elif neg_count > 0:
+        sentiment = "Mixed"
+        sentiment_score = -0.1
+        
+    # 3. Urgency Heuristics
+    urgency = "Medium"
+    if is_security_threat or "p0" in subject_body or "outage" in subject_body or "down" in subject_body or "emergency" in subject_body:
+        urgency = "Critical"
+    elif is_urgent or "p1" in subject_body or "asap" in subject_body or "urgent" in subject_body or "deadline" in subject_body:
+        urgency = "High"
+    elif "discount" in subject_body or "trial" in subject_body:
+        urgency = "Low"
+        
+    # 4. Requires Human
+    requires_human = urgency in ["Critical", "High"] or category == "Compliance/Legal" or is_gdpr_request
+    
+    # 5. Suggested Reply based on RAG
+    suggested_reply = None
+    if rag_context:
+        best_chunk = rag_context[0]["chunk_text"]
+        suggested_reply = f"Thank you for contacting us. Based on our policy: '{best_chunk[:100]}...', we are investigating your request."
+    else:
+        suggested_reply = "Thank you for reaching out. We have received your email and our team is reviewing it."
+        
+    return {
+        "category": category,
+        "sentiment": sentiment,
+        "sentiment_score": sentiment_score,
+        "urgency": urgency,
+        "requires_human": requires_human,
+        "confidence": 0.85,
+        "detected_entities": {}
+    }
+
+async def process_email_background_async(email_id: str):
+    from models.database import AsyncSessionLocal
+    from services.classification import classify_email, generate_search_query
+    from rag.retriever import retrieve_chunks
+    from services.sentiment import check_sentiment_deterioration
+    from services.intelligence import should_trigger_intelligence, get_or_scrape_intelligence
+    from agent.loop import run_agent
+    from models.models import Email
+    import os
+    import json
+    
+    async with AsyncSessionLocal() as db:
+        try:
+            # 1. Fetch Email
+            stmt = select(Email).where(Email.id == email_id)
+            res = await db.execute(stmt)
+            email = res.scalar_one_or_none()
+            if not email:
+                return
+                
+            # 2. Get Thread History
+            thread_stmt = select(Email).where(Email.sender == email.sender).order_by(Email.timestamp.desc()).limit(10)
+            thread_res = await db.execute(thread_stmt)
+            recent_emails = thread_res.scalars().all()
+            thread_history = [
+                {"sender": e.sender, "body": e.body, "timestamp": str(e.timestamp)}
+                for e in reversed(recent_emails) if e.id != email_id
+            ]
+            
+            # 3. RAG Search
+            search_query = await generate_search_query(email.subject, email.body)
+            rag_context = await retrieve_chunks(db, search_query, top_k=2)
+            
+            # 4. Run Classification
+            key = os.getenv("GEMINI_API_KEY")
+            is_configured = bool(key and not key.startswith("your_") and key != "")
+            
+            if is_configured:
+                # Use Gemini
+                parsed = await classify_email(email.subject, email.body, thread_history, rag_context)
+            else:
+                # Mock classification using heuristics
+                parsed = run_mock_classification(
+                    email.subject, 
+                    email.body, 
+                    email.is_security_threat, 
+                    email.is_urgent, 
+                    email.is_gdpr_request, 
+                    rag_context
+                )
+                
+            # 5. Update Email Classification in DB
+            email.category = parsed.get("category", "General Inquiry")
+            s_score = parsed.get("sentiment_score")
+            if s_score is None:
+                s_label = parsed.get("sentiment", "Neutral")
+                s_score = 0.5 if s_label == "Positive" else (-0.5 if s_label == "Negative" else 0.0)
+            email.sentiment_score = s_score
+            email.urgency = parsed.get("urgency", "Medium")
+            email.requires_human = parsed.get("requires_human", False)
+            email.confidence = parsed.get("confidence", 0.9)
+            email.raw_entities = parsed.get("detected_entities", {})
+            
+            # Save Classification updates
+            await db.commit()
+            
+            # 6. Check Sentiment Deterioration
+            await check_sentiment_deterioration(db, email.sender)
+            
+            # 7. Run Agent
+            await run_agent(email_id, db, dry_run=False)
+            
+            # 8. Web Reputation Scraping
+            if should_trigger_intelligence(email.body, email.sentiment_score, email.category, email.urgency):
+                await get_or_scrape_intelligence(db)
+                
+        except Exception as e:
+            import traceback
+            print(f"Error in background email processing: {e}")
+            traceback.print_exc()
+
 def process_email_background(email_id: str):
-    # This is where LLM processing will happen. Placeholder for now.
-    pass
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+    if loop.is_running():
+        loop.create_task(process_email_background_async(email_id))
+    else:
+        loop.run_until_complete(process_email_background_async(email_id))
 
 @router.post("/ingest", response_model=SuccessEnvelope)
 async def ingest_email(

@@ -14,6 +14,56 @@ class RespondRequest(BaseModel):
     reply_body: str
     user_id: str
 
+@router.get("/threads/all", response_model=SuccessEnvelope)
+async def get_all_threads(db: AsyncSession = Depends(get_db)):
+    """
+    Returns all threads in the database with their associated emails and actions.
+    """
+    stmt = (
+        select(Thread)
+        .options(selectinload(Thread.emails).selectinload(Email.actions))
+        .order_by(Thread.updated_at.desc())
+    )
+    res = await db.execute(stmt)
+    threads = res.scalars().all()
+    
+    threads_data = []
+    for t in threads:
+        thread_data = {
+            "id": t.id,
+            "subject": t.subject,
+            "status": t.status,
+            "sender_email": t.sender_email,
+            "emails": []
+        }
+        for e in sorted(t.emails, key=lambda x: x.timestamp):
+            actions_list = [
+                {
+                    "id": a.id,
+                    "type": a.action_type,
+                    "reason": a.escalation_reason,
+                    "draft": a.proposed_reply,
+                    "reasoning_log": a.agent_reasoning_log,
+                    "is_approved": a.is_approved,
+                    "approved_by": a.approved_by
+                } for a in e.actions
+            ]
+            thread_data["emails"].append({
+                "id": e.id,
+                "sender": e.sender,
+                "body": e.body,
+                "timestamp": str(e.timestamp),
+                "sentiment": e.sentiment_score,
+                "category": e.category,
+                "urgency": e.urgency,
+                "requires_human": e.requires_human,
+                "is_spam": e.is_spam,
+                "actions": actions_list
+            })
+        threads_data.append(thread_data)
+        
+    return SuccessEnvelope(data={"threads": threads_data})
+
 @router.get("/threads/{contact_email}", response_model=SuccessEnvelope)
 async def get_threads(contact_email: str, db: AsyncSession = Depends(get_db)):
     """
@@ -58,15 +108,22 @@ async def get_threads(contact_email: str, db: AsyncSession = Depends(get_db)):
                     "id": a.id,
                     "type": a.action_type,
                     "reason": a.escalation_reason,
-                    "draft": a.proposed_reply
+                    "draft": a.proposed_reply,
+                    "reasoning_log": a.agent_reasoning_log,
+                    "is_approved": a.is_approved,
+                    "approved_by": a.approved_by
                 } for a in e.actions
             ]
             thread_data["emails"].append({
                 "id": e.id,
+                "sender": e.sender,
                 "body": e.body,
                 "timestamp": str(e.timestamp),
                 "sentiment": e.sentiment_score,
                 "category": e.category,
+                "urgency": e.urgency,
+                "requires_human": e.requires_human,
+                "is_spam": e.is_spam,
                 "actions": actions_list
             })
         data["threads"].append(thread_data)

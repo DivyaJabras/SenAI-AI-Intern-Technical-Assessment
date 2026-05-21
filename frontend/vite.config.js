@@ -11,7 +11,9 @@ export default defineConfig({
       '/agent': 'http://localhost:8000',
       '/analytics': 'http://localhost:8000',
       '/intelligence': 'http://localhost:8000',
-      '/threads': 'http://localhost:8000'
+      '/threads': 'http://localhost:8000',
+      '/drafts': 'http://localhost:8000',
+      '/respond': 'http://localhost:8000'
     }
   }
 })

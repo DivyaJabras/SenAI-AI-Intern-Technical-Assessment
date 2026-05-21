@@ -58,7 +58,7 @@ class AgentTools:
             return f"[DRY-RUN] Simulated drafted reply using tone '{tone}' and policies {policy_refs}"
         
         prompt = f"Draft an email reply with tone: {tone}. Context: {context}. Reference policies: {policy_refs}"
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
         resp = await model.generate_content_async(prompt)
         return resp.text.strip()
 
