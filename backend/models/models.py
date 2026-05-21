@@ -2,7 +2,7 @@ from sqlalchemy import Column, Integer, String, Text, Numeric, Float, Boolean, D
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
-from datetime import datetime, timezone
+from datetime import datetime
 
 from .database import Base
 
@@ -15,8 +15,8 @@ class Contact(Base):
     status = Column(String, default="Active") # VIP/Blocked/Active/Churned
     account_value = Column(Numeric(10, 2), default=0.0)
     churn_risk_score = Column(Float, default=0.0)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     threads = relationship("Thread", back_populates="contact")
 
@@ -28,8 +28,8 @@ class Thread(Base):
     sender_email = Column(String, ForeignKey("contacts.email"), index=True)
     status = Column(String, default="Open") # Open/Resolved/Escalated/Ignored
     assigned_to = Column(String, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     contact = relationship("Contact", back_populates="threads")
     emails = relationship("Email", back_populates="thread")
@@ -73,7 +73,7 @@ class Action(Base):
     escalation_reason = Column(String, nullable=True)
     is_approved = Column(Boolean, default=False)
     approved_by = Column(String, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=datetime.utcnow)
     
     email = relationship("Email", back_populates="actions")
     
@@ -101,4 +101,4 @@ class AuditLog(Base):
     entity_id = Column(String)
     performed_by = Column(String) # "agent" or user_id
     diff = Column(JSONB) 
-    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    timestamp = Column(DateTime, default=datetime.utcnow)

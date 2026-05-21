@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from models.models import Email, Thread, Contact, Action
 from models.database import get_db
-from models.models import Email, Thread, Contact
+import logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 from .schemas import EmailIngestRequest, SuccessEnvelope, ErrorEnvelope
 from typing import Dict, Any
 
@@ -198,7 +201,11 @@ async def process_email_background_async(email_id: str):
                 
         except Exception as e:
             import traceback
-            print(f"Error in background email processing: {e}")
+            logger.exception("Error in background email processing")
+            # Record the error in the Action table for visibility in the UI
+            error_action = Action(email_id=email_id, action_type="Error", escalation_reason=str(e))
+            db.add(error_action)
+            await db.commit()
             traceback.print_exc()
 
 def process_email_background(email_id: str):
